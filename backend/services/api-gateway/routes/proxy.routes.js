@@ -40,8 +40,25 @@ const createProxyOptions = (prefix) => ({
 // Route: /api/auth/* -> Auth Service
 router.use('/auth', proxy(AUTH_SERVICE_URL, createProxyOptions('/api/auth')))
 
+// Route: /api/resources/:id/claims -> Claim Service
+router.post('/resources/:id/claims', proxy(CLAIM_SERVICE_URL, {
+  ...createProxyOptions('/api/claims'),
+  proxyReqPathResolver: (req) => `/api/claims/${req.params.id}`,
+}))
+
 // Route: /api/resources/* -> Resource Service
 router.use('/resources', proxy(RESOURCE_SERVICE_URL, createProxyOptions('/api/resources')))
+
+// Route: /api/my/claims -> Claim Service (/api/claims/my and /api/claims/:id/status)
+router.use('/my/claims', proxy(CLAIM_SERVICE_URL, {
+  ...createProxyOptions('/api/claims'),
+  proxyReqPathResolver: (req) => {
+    if (req.url && req.url !== '/' && req.url !== '') {
+      return `/api/claims${req.url}/status`
+    }
+    return '/api/claims/my'
+  },
+}))
 
 // Route: /api/claims/* -> Claim Service
 router.use('/claims', proxy(CLAIM_SERVICE_URL, createProxyOptions('/api/claims')))

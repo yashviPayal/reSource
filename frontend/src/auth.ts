@@ -1,77 +1,140 @@
-import { Amplify } from 'aws-amplify'
-import { confirmSignUp, fetchAuthSession, fetchUserAttributes, getCurrentUser, signIn, signOut, signUp } from 'aws-amplify/auth'
+const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:4000/api').replace(/\/$/, '')
 
-const userPoolId = import.meta.env.VITE_COGNITO_USER_POOL_ID as string | undefined
-const userPoolClientId = import.meta.env.VITE_COGNITO_CLIENT_ID as string | undefined
-
-export const authConfigured = Boolean(userPoolId && userPoolClientId)
-
-if (authConfigured) {
-  Amplify.configure({
-    Auth: {
-      Cognito: {
-        userPoolId: userPoolId!,
-        userPoolClientId: userPoolClientId!,
-        loginWith: { email: true },
-        signUpVerificationMethod: 'code',
-      },
-    },
-  })
-}
+export const authConfigured = true
 
 export type AppUser = { userId: string; username: string; email?: string }
 
 export async function currentAppUser(): Promise<AppUser | null> {
-  if (!authConfigured) return null
+  const token = authToken()
   try {
-    const user = await getCurrentUser()
-    let displayName = user.username
-    let email = ''
-    try {
-      const attrs = await fetchUserAttributes()
-      if (attrs.name && attrs.name.trim()) {
-        displayName = attrs.name.trim()
-      } else if (attrs.email) {
-        displayName = attrs.email.split('@')[0]
+    const response = await fetch(`${API_URL}/auth/me`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      signal: AbortSignal.timeout(5000),
+    })
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('auth_user')
       }
-      if (attrs.email) {
-        email = attrs.email.trim()
-      }
-    } catch {
-      // Fallback to user.username if attributes fetch fails
+      return null
     }
-    return { userId: user.userId, username: displayName, email }
+
+    const data = await response.json()
+    if (data.user) {
+      localStorage.setItem('auth_user', JSON.stringify(data.user))
+      return {
+        userId: String(data.user.id),
+        username: data.user.name || data.user.email?.split('@')[0] || 'User',
+        email: data.user.email,
+      }
+    }
+    return null
   } catch {
+    const cached = localStorage.getItem('auth_user')
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached)
+        return {
+          userId: String(parsed.id),
+          username: parsed.name,
+          email: parsed.email,
+        }
+      } catch {
+        return null
+      }
+    }
     return null
   }
 }
 
-export async function authToken(): Promise<string | null> {
-  if (!authConfigured) return null
+export function authToken(): string | null {
   try {
-    const session = await fetchAuthSession()
-    return session.tokens?.accessToken?.toString() ?? null
+    return localStorage.getItem('auth_token')
   } catch {
     return null
   }
 }
 
 export async function registerUser(email: string, password: string, name: string) {
-  return signUp({
-    username: email.trim().toLowerCase(),
-    password,
-    options: { userAttributes: { email: email.trim().toLowerCase(), name: name.trim() } },
+  const response = await fetch(`${API_URL}/auth/register`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: email.trim().toLowerCase(),
+      password,
+      name: name.trim(),
+    }),
   })
+
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(data.error || 'Registration failed.')
+  }
+
+  if (data.token) {
+    localStorage.setItem('auth_token', data.token)
+  }
+  if (data.user) {
+    localStorage.setItem('auth_user', JSON.stringify(data.user))
+  }
+
+  return {
+    isSignUpComplete: true,
+    nextStep: { signUpStep: 'DONE' as 'DONE' | 'CONFIRM_SIGN_UP' },
+    user: data.user,
+  }
 }
 
-export async function confirmUser(email: string, code: string) {
-  return confirmSignUp({ username: email.trim().toLowerCase(), confirmationCode: code.trim() })
+export async function confirmUser(_email: string, _code: string) {
+  return { isSignUpComplete: true, nextStep: { signUpStep: 'DONE' as 'DONE' | 'CONFIRM_SIGN_UP' } }
 }
 
 export async function loginUser(email: string, password: string) {
-  return signIn({ username: email.trim().toLowerCase(), password })
+  const response = await fetch(`${API_URL}/auth/login`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: email.trim().toLowerCase(),
+      password,
+    }),
+  })
+
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(data.error || 'Invalid email or password.')
+  }
+
+  if (data.token) {
+    localStorage.setItem('auth_token', data.token)
+  }
+  if (data.user) {
+    localStorage.setItem('auth_user', JSON.stringify(data.user))
+  }
+
+  return {
+    isSignedIn: true,
+    nextStep: { signInStep: 'DONE' as 'DONE' | 'CONFIRM_SIGN_UP' },
+    user: data.user,
+  }
 }
 
 export async function logoutUser() {
-  if (authConfigured) await signOut()
+  try {
+    await fetch(`${API_URL}/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+  } catch {
+    // Ignore network error on logout
+  } finally {
+    localStorage.removeItem('auth_token')
+    localStorage.removeItem('auth_user')
+  }
 }

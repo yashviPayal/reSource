@@ -15,6 +15,7 @@ router.post('/', validateClaimCreate, ClaimController.create)
 router.post('/:resourceId', validateClaimCreate, ClaimController.create)
 router.get('/my', ClaimController.getMyClaims)
 router.get('/', ClaimController.getMyClaims)
+router.patch('/:id', validateClaimStatus, ClaimController.updateStatus)
 router.patch('/:id/status', validateClaimStatus, ClaimController.updateStatus)
 
 export default router

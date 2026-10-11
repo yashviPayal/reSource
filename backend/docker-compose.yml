@@ -79,6 +79,9 @@ services:
       - "${AUTH_PORT:-4002}:4002"
     env_file:
       - ./services/auth-service/.env
+    depends_on:
+      auth-db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4002/health"]
       interval: 10s
@@ -117,6 +120,9 @@ services:
       - "${RESOURCE_PORT:-4001}:4001"
     env_file:
       - ./services/resource-service/.env
+    depends_on:
+      resource-db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4001/health"]
       interval: 10s
@@ -159,6 +165,8 @@ services:
       - RESOURCE_SERVICE_URL=http://resource-service:4001
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
     depends_on:
+      claim-db:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     healthcheck:
