@@ -4,6 +4,7 @@ import cors from 'cors'
 import helmet from 'helmet'
 import cookieParser from 'cookie-parser'
 import { pool, initializeDatabase } from './config/db.js'
+import { getRabbitChannel, closeRabbitPublisher } from './events/claim.events.js'
 import claimRoutes from './routes/claim.routes.js'
 import { errorHandler } from './middleware/error.middleware.js'
 
@@ -58,12 +59,16 @@ app.use(errorHandler)
 async function startServer() {
   try {
     await initializeDatabase()
+    // Pre-warm RabbitMQ channel connection asynchronously
+    void getRabbitChannel()
+
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`[claim-service] Server running on http://0.0.0.0:${PORT}`)
     })
 
     const shutdown = async (signal) => {
       console.log(`\n[claim-service] Received ${signal}. Shutting down gracefully...`)
+      await closeRabbitPublisher()
       server.close(async () => {
         await pool.end()
         console.log('[claim-service] Database pool closed. Process terminated.')
