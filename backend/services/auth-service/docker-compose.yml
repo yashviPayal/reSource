@@ -1,0 +1,39 @@
+services:
+  auth-db:
+    image: postgres:16-alpine
+    container_name: auth-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-auth_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-auth_dev_password}
+      POSTGRES_DB: ${DB_NAME:-auth_db}
+    ports:
+      - "${DB_PORT:-5434}:5432"
+    volumes:
+      - auth_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-auth_user} -d ${DB_NAME:-auth_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: auth-service
+    restart: unless-stopped
+    ports:
+      - "${PORT:-4002}:4002"
+    # DevSecOps Best Practice: Load secrets securely from .env file (not committed to git)
+    env_file:
+      - .env
+    environment:
+      # In container networking, auth-service reaches auth-db via service hostname
+      - DATABASE_URL=postgresql://${DB_USER:-auth_user}:${DB_PASSWORD:-auth_dev_password}@auth-db:5432/${DB_NAME:-auth_db}
+    depends_on:
+      auth-db:
+        condition: service_healthy
+
+volumes:
+  auth_postgres_data:
