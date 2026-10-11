@@ -1,5 +1,5 @@
 import { Amplify } from 'aws-amplify'
-import { confirmSignUp, fetchAuthSession, getCurrentUser, signIn, signOut, signUp } from 'aws-amplify/auth'
+import { confirmSignUp, fetchAuthSession, fetchUserAttributes, getCurrentUser, signIn, signOut, signUp } from 'aws-amplify/auth'
 
 const userPoolId = import.meta.env.VITE_COGNITO_USER_POOL_ID as string | undefined
 const userPoolClientId = import.meta.env.VITE_COGNITO_CLIENT_ID as string | undefined
@@ -19,13 +19,28 @@ if (authConfigured) {
   })
 }
 
-export type AppUser = { userId: string; username: string }
+export type AppUser = { userId: string; username: string; email?: string }
 
 export async function currentAppUser(): Promise<AppUser | null> {
   if (!authConfigured) return null
   try {
     const user = await getCurrentUser()
-    return { userId: user.userId, username: user.username }
+    let displayName = user.username
+    let email = ''
+    try {
+      const attrs = await fetchUserAttributes()
+      if (attrs.name && attrs.name.trim()) {
+        displayName = attrs.name.trim()
+      } else if (attrs.email) {
+        displayName = attrs.email.split('@')[0]
+      }
+      if (attrs.email) {
+        email = attrs.email.trim()
+      }
+    } catch {
+      // Fallback to user.username if attributes fetch fails
+    }
+    return { userId: user.userId, username: displayName, email }
   } catch {
     return null
   }

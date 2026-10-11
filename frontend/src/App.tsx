@@ -13,8 +13,18 @@ type Listing = {
   id: number; title: string; category: Category; action: Action; condition: Condition
   location: string; description: string; status: string; created_at: string
 }
-type NewListing = Omit<Listing, 'id' | 'status' | 'created_at'>
+type NewListing = Omit<Listing, 'id' | 'status' | 'created_at'> & { owner_email?: string }
 type ClaimForm = { requester_name: string; requester_email: string; message: string }
+type MyClaim = {
+  id: number
+  resource_id: number
+  resource_title: string
+  resource_category: Category
+  requester_name: string
+  message: string
+  status: 'pending' | 'approved' | 'rejected'
+  created_at: string
+}
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:4001/api').replace(/\/$/, '')
 const categories: { name: Category; icon: typeof BookOpen; note: string }[] = [
@@ -77,6 +87,10 @@ export default function App() {
   const [authCode, setAuthCode] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
   const [authError, setAuthError] = useState('')
+  const [showMyClaims, setShowMyClaims] = useState(false)
+  const [myClaims, setMyClaims] = useState<MyClaim[]>([])
+  const [loadingClaims, setLoadingClaims] = useState(false)
+  const [updatingClaimId, setUpdatingClaimId] = useState<number | null>(null)
 
   const loadListings = useCallback(async () => {
     setLoading(true); setLoadError('')
@@ -91,6 +105,39 @@ export default function App() {
   useEffect(() => { void loadListings() }, [loadListings])
   useEffect(() => { void currentAppUser().then(setUser) }, [])
   useEffect(() => { localStorage.setItem('resource-favorites', JSON.stringify(favorites)) }, [favorites])
+
+  const loadMyClaims = useCallback(async () => {
+    if (!user) return
+    setLoadingClaims(true)
+    try {
+      const payload = await apiFetch('/my/claims')
+      setMyClaims(Array.isArray(payload.claims) ? payload.claims : [])
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not load incoming requests.')
+    } finally { setLoadingClaims(false) }
+  }, [user])
+
+  useEffect(() => {
+    if (user) void loadMyClaims()
+  }, [user, loadMyClaims])
+
+  async function updateClaimStatus(claimId: number, newStatus: 'approved' | 'rejected') {
+    setUpdatingClaimId(claimId)
+    try {
+      const res = await apiFetch(`/my/claims/${claimId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: newStatus }),
+      })
+      setMyClaims(prev => prev.map(c => c.id === claimId ? { ...c, status: newStatus } : c))
+      setNotice(res.message || `Request ${newStatus}.`)
+      void loadListings()
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Failed to update request.')
+    } finally {
+      setUpdatingClaimId(null)
+    }
+  }
+
   useEffect(() => {
     if (!notice) return
     const timeout = window.setTimeout(() => setNotice(''), 3800)
@@ -148,7 +195,10 @@ export default function App() {
   async function createListing(data: NewListing) {
     setCreateBusy(true); setCreateError('')
     try {
-      const payload = await apiFetch('/resources', { method: 'POST', body: JSON.stringify(data) })
+      const payload = await apiFetch('/resources', {
+        method: 'POST',
+        body: JSON.stringify({ ...data, owner_email: user?.email || undefined }),
+      })
       setListings(prev => [payload.resource, ...prev.filter(x => x.id !== payload.resource.id)])
       setShowCreate(false); setNotice('Your listing is live. Thanks for passing value forward!')
       setCategory('All'); setAction('All'); setFavoritesOnly(false); setQuery('')
@@ -161,7 +211,13 @@ export default function App() {
     if (!selected) return
     setClaimBusy(true); setClaimError('')
     try {
-      await apiFetch(`/resources/${selected.id}/claims`, { method: 'POST', body: JSON.stringify({ message: claimForm.message.trim() }) })
+      await apiFetch(`/resources/${selected.id}/claims`, {
+        method: 'POST',
+        body: JSON.stringify({
+          message: claimForm.message.trim(),
+          requester_name: user?.username || undefined,
+        }),
+      })
       setShowClaim(false); setSelected(null); setClaimForm(blankClaim)
       setNotice('Your request has been saved successfully.')
     } catch (error) { setClaimError(error instanceof Error ? error.message : 'Could not send request.') }
@@ -178,7 +234,12 @@ export default function App() {
       <button className="mobile-menu-button icon-button" onClick={() => setMobileMenu(v => !v)} aria-label="Toggle menu">{mobileMenu ? <X /> : <Menu />}</button>
       <nav className={`nav-links ${mobileMenu ? 'nav-open' : ''}`}>
         <button onClick={goToBrowse}>Browse items</button><a href="#how-it-works" onClick={() => setMobileMenu(false)}>How it works</a><a href="#impact" onClick={() => setMobileMenu(false)}>Our impact</a>
-        <div className="auth-nav">{user ? <><span className="auth-username">{user.username}</span><button className="button button-secondary auth-button" onClick={handleSignOut}>Sign out</button></> : <button className="button button-secondary auth-button" onClick={() => { setAuthOpen(true); setAuthMode('signin'); setAuthError(''); setMobileMenu(false) }}>Sign in</button>}</div><button className="button button-primary nav-cta" onClick={() => { requestCreateListing(); setMobileMenu(false) }}><PackagePlus size={17} /> Share an item</button>
+        {user && (
+          <button onClick={() => { setShowMyClaims(true); void loadMyClaims(); setMobileMenu(false) }}>
+            Incoming requests {myClaims.filter(c => c.status === 'pending').length > 0 ? `(${myClaims.filter(c => c.status === 'pending').length})` : ''}
+          </button>
+        )}
+        <div className="auth-nav">{user ? <><span className="auth-username" title={user.username}>{user.username}</span><button className="button button-secondary auth-button" onClick={handleSignOut}>Sign out</button></> : <button className="button button-secondary auth-button" onClick={() => { setAuthOpen(true); setAuthMode('signin'); setAuthError(''); setMobileMenu(false) }}>Sign in</button>}</div><button className="button button-primary nav-cta" onClick={() => { requestCreateListing(); setMobileMenu(false) }}><PackagePlus size={17} /> Share an item</button>
       </nav>
     </header>
 
@@ -211,6 +272,65 @@ export default function App() {
 
     {selected && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget && !claimBusy) setSelected(null) }}><section className="modal details-modal" role="dialog" aria-modal="true" aria-labelledby="details-title"><div className="details-art"><button className="icon-button details-close" onClick={() => setSelected(null)} aria-label="Close details"><X /></button><span>{categoryEmoji(selected.category)}</span><small>{selected.category}</small></div><div className="details-body"><div className="listing-tags"><span className={actionClass(selected.action)}>{selected.action}</span><span className="condition-tag">{selected.condition}</span></div><h2 id="details-title">{selected.title}</h2><p className="details-description">{selected.description || 'A useful item looking for its next home.'}</p><div className="details-meta"><span><MapPin size={16} />{selected.location}</span><span><Clock3 size={15} />Added {dateLabel(selected.created_at)}</span></div>{!showClaim ? <div className="details-actions"><button className={`button button-secondary ${favorites.includes(selected.id) ? 'saved-detail-button' : ''}`} onClick={() => toggleFavorite(selected.id)}><Heart size={17} fill={favorites.includes(selected.id) ? 'currentColor' : 'none'} />{favorites.includes(selected.id) ? 'Saved' : 'Save item'}</button><button className="button button-primary" disabled={selected.status !== 'available'} onClick={() => { if (requestClaim()) setClaimError('') }}>Request this item <ArrowRight size={17} /></button></div> : <form className="claim-form" onSubmit={submitClaim}><h3>Request this item</h3><p>Requesting as <strong>{user?.username}</strong>. The owner can identify your account from your request.</p><label>Message <span className="optional-label">(optional)</span><textarea rows={2} maxLength={500} value={claimForm.message} onChange={e => setClaimForm(p => ({ ...p, message: e.target.value }))} placeholder="When would pickup work for you?" /></label>{claimError && <p className="form-error" role="alert">{claimError}</p>}<div className="form-actions"><button type="button" className="button button-secondary" disabled={claimBusy} onClick={() => setShowClaim(false)}>Back</button><button type="submit" className="button button-primary" disabled={claimBusy}>{claimBusy ? <><span className="spinner" /> Sending…</> : 'Send request'}</button></div><p className="form-footnote"><ShieldCheck size={14} /> Your details are used to process this request.</p></form>}</div></section></div>}
     {authOpen && <div className="modal-backdrop auth-backdrop" onMouseDown={e => { if (e.target === e.currentTarget && !authBusy) setAuthOpen(false) }}><section className="modal auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title"><div className="modal-header"><div><span className="eyebrow">YOUR COMMUNITY ACCOUNT</span><h2 id="auth-title">{authMode === 'signup' ? 'Create your account' : authMode === 'confirm' ? 'Verify your email' : 'Welcome back'}</h2><p>{authMode === 'signup' ? 'Join the community and pass value forward.' : authMode === 'confirm' ? 'Enter the code sent to your email address.' : 'Sign in to share items and request what you need.'}</p></div><button className="icon-button modal-close" onClick={() => setAuthOpen(false)} disabled={authBusy} aria-label="Close authentication"><X /></button></div>{!authConfigured ? <div className="auth-config-warning"><ShieldCheck size={24} /><strong>Amazon Cognito needs configuration</strong><p>Set VITE_COGNITO_USER_POOL_ID and VITE_COGNITO_CLIENT_ID in frontend/.env, and matching COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID in the backend .env. Restart both services afterward.</p></div> : <form className="modal-form" onSubmit={submitAuth}>{authMode === 'signup' && <label>Full name<input required maxLength={100} autoComplete="name" value={authName} onChange={e => setAuthName(e.target.value)} placeholder="Your name" /></label>}{authMode !== 'confirm' && <label>Email address<input required type="email" autoComplete="email" maxLength={254} value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="you@example.com" /></label>}{authMode === 'confirm' ? <label>Verification code<input required inputMode="numeric" autoComplete="one-time-code" value={authCode} onChange={e => setAuthCode(e.target.value)} placeholder="Code from email" /></label> : <label>Password<input required type="password" autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'} minLength={8} value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="At least 8 characters" /></label>}{authError && <p className="form-error" role="alert">{authError}</p>}<div className="form-actions"><button type="button" className="button button-secondary" disabled={authBusy} onClick={() => { setAuthError(''); setAuthMode(authMode === 'confirm' ? 'signin' : authMode === 'signin' ? 'signup' : 'signin') }}>{authMode === 'confirm' ? 'Back to sign in' : authMode === 'signin' ? 'Create account' : 'Have an account? Sign in'}</button><button type="submit" className="button button-primary" disabled={authBusy}>{authBusy ? <><span className="spinner" /> Working…</> : authMode === 'signup' ? 'Create account' : authMode === 'confirm' ? 'Verify email' : 'Sign in'}</button></div><p className="form-footnote"><ShieldCheck size={14} /> Passwords are managed by Amazon Cognito, not stored by reSource.</p></form>}</section></div>}
+
+    {showMyClaims && (
+      <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setShowMyClaims(false) }}>
+        <section className="modal claims-modal" role="dialog" aria-modal="true" aria-labelledby="claims-title">
+          <div className="modal-header">
+            <div>
+              <span className="eyebrow">YOUR LISTINGS</span>
+              <h2 id="claims-title">Incoming requests</h2>
+              <p>Manage people who requested your shared items.</p>
+            </div>
+            <button className="icon-button modal-close" onClick={() => setShowMyClaims(false)} aria-label="Close"><X /></button>
+          </div>
+          <div className="claims-list">
+            {loadingClaims ? (
+              <p style={{ textAlign: 'center', padding: '24px', color: '#7a867b' }}>Loading requests...</p>
+            ) : myClaims.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '36px 12px', color: '#7a867b' }}>
+                <p style={{ margin: 0, fontWeight: 700, fontSize: '15px' }}>No requests received yet</p>
+                <small>When community members request items you listed, they will show up here.</small>
+              </div>
+            ) : (
+              myClaims.map(claim => (
+                <div className="claim-card" key={claim.id}>
+                  <div className="claim-header">
+                    <div>
+                      <div className="claim-title">{claim.resource_title}</div>
+                      <div className="claim-requester">Requested by <strong>{claim.requester_name}</strong></div>
+                    </div>
+                    <span className={`claim-status status-${claim.status}`}>{claim.status}</span>
+                  </div>
+                  {claim.message && <div className="claim-message">&ldquo;{claim.message}&rdquo;</div>}
+                  <div className="claim-meta">
+                    <span>{dateLabel(claim.created_at)}</span>
+                    {claim.status === 'pending' && (
+                      <div className="claim-btn-group">
+                        <button
+                          className="btn-approve"
+                          disabled={updatingClaimId === claim.id}
+                          onClick={() => void updateClaimStatus(claim.id, 'approved')}
+                        >
+                          {updatingClaimId === claim.id ? 'Updating...' : 'Approve'}
+                        </button>
+                        <button
+                          className="btn-reject"
+                          disabled={updatingClaimId === claim.id}
+                          onClick={() => void updateClaimStatus(claim.id, 'rejected')}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      </div>
+    )}
     <a className="skip-link" href="#browse">Skip to listings</a>
   </div>
 }
