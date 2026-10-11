@@ -133,7 +133,7 @@ app.post('/api/resources/:id/claims', requireAuth, async (req, res, next) => {
     const requesterName = String(req.auth.username || req.auth.sub).slice(0, 100)
     const result = await pool.query(
       `INSERT INTO claims (resource_id, requester_name, requester_email, requester_sub, message)
-       SELECT id, $2, NULL, $3, $4 FROM resources WHERE id = $1 AND status = 'available' AND owner_sub IS DISTINCT FROM $3
+       SELECT id, $2, NULL, $3::text, $4 FROM resources WHERE id = $1 AND status = 'available' AND owner_sub IS DISTINCT FROM $3::text
        RETURNING id, resource_id, requester_name, status, created_at`,
       [req.params.id, requesterName, req.auth.sub, message],
     )
