@@ -1,0 +1,12 @@
+{
+  "name": "resource-mvp",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "concurrently -n api,web -c green,cyan \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm --prefix services/resource-service run dev",
+    "dev:web": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build && npm --prefix services/resource-service test"
+  },
+  "devDependencies": { "concurrently": "^9.2.1" }
+}
