@@ -11,6 +11,7 @@ const CLIENT_URL = process.env.CLIENT_URL || '*'
 
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:4002'
 const RESOURCE_SERVICE_URL = process.env.RESOURCE_SERVICE_URL || 'http://localhost:4001'
+const CLAIM_SERVICE_URL = process.env.CLAIM_SERVICE_URL || 'http://localhost:4003'
 
 // Security headers
 app.disable('x-powered-by')
@@ -36,6 +37,7 @@ app.get('/health', (_req, res) => {
     routes: {
       auth: AUTH_SERVICE_URL,
       resources: RESOURCE_SERVICE_URL,
+      claims: CLAIM_SERVICE_URL,
     },
   })
 })
@@ -47,7 +49,7 @@ app.use('/api', proxyRoutes)
 app.use((_req, res) => {
   res.status(404).json({
     success: false,
-    error: 'API Gateway: Route not found. Available endpoints are /api/auth/* and /api/resources/*',
+    error: 'API Gateway: Route not found. Available endpoints are /api/auth/*, /api/resources/*, and /api/claims/*',
   })
 })
 
@@ -65,6 +67,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`[api-gateway] Running on http://0.0.0.0:${PORT}`)
   console.log(`[api-gateway] Routing /api/auth/*      -> ${AUTH_SERVICE_URL}`)
   console.log(`[api-gateway] Routing /api/resources/* -> ${RESOURCE_SERVICE_URL}`)
+  console.log(`[api-gateway] Routing /api/claims/*    -> ${CLAIM_SERVICE_URL}`)
 })
 
 const shutdown = (signal) => {

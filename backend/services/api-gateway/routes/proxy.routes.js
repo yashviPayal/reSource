@@ -5,6 +5,7 @@ const router = Router()
 
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:4002'
 const RESOURCE_SERVICE_URL = process.env.RESOURCE_SERVICE_URL || 'http://localhost:4001'
+const CLAIM_SERVICE_URL = process.env.CLAIM_SERVICE_URL || 'http://localhost:4003'
 
 // Proxy options preserving cookies and request headers
 const createProxyOptions = (prefix) => ({
@@ -40,5 +41,8 @@ router.use('/auth', proxy(AUTH_SERVICE_URL, createProxyOptions('/api/auth')))
 
 // Route: /api/resources/* -> Resource Service
 router.use('/resources', proxy(RESOURCE_SERVICE_URL, createProxyOptions('/api/resources')))
+
+// Route: /api/claims/* -> Claim Service
+router.use('/claims', proxy(CLAIM_SERVICE_URL, createProxyOptions('/api/claims')))
 
 export default router
