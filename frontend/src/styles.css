@@ -238,3 +238,45 @@ body { font-size: 16px; line-height: 1.55; }
 .btn-reject { background: #fff; border: 1px solid #dce4d8; color: #a53e2f; border-radius: 8px; padding: 7px 14px; font-size: 12px; font-weight: 700; cursor: pointer; }
 .btn-reject:hover:not(:disabled) { background: #fff5f5; border-color: #f3d3d3; }
 .btn-approve:disabled, .btn-reject:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.claims-tabs {
+  display: flex;
+  border-bottom: 1px solid #e9ede5;
+  background: #fdfefc;
+  padding: 0 24px;
+}
+.claims-tab-btn {
+  flex: 1;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  padding: 13px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #6e7b70;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.15s;
+}
+.claims-tab-btn:hover {
+  color: var(--green);
+}
+.claims-tab-btn.tab-active {
+  color: var(--green);
+  border-bottom-color: var(--green);
+}
+.tab-badge {
+  background: #edf4e9;
+  color: var(--green);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-weight: 800;
+}
+.tab-badge.badge-pending {
+  background: #fef3c7;
+  color: #b45309;
+}

@@ -20,7 +20,9 @@ type MyClaim = {
   resource_id: number
   resource_title: string
   resource_category: Category
+  resource_location?: string
   requester_name: string
+  requester_email?: string
   message: string
   status: 'pending' | 'approved' | 'rejected'
   created_at: string
@@ -88,7 +90,9 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false)
   const [authError, setAuthError] = useState('')
   const [showMyClaims, setShowMyClaims] = useState(false)
-  const [myClaims, setMyClaims] = useState<MyClaim[]>([])
+  const [claimsTab, setClaimsTab] = useState<'received' | 'sent'>('received')
+  const [receivedClaims, setReceivedClaims] = useState<MyClaim[]>([])
+  const [sentClaims, setSentClaims] = useState<MyClaim[]>([])
   const [loadingClaims, setLoadingClaims] = useState(false)
   const [updatingClaimId, setUpdatingClaimId] = useState<number | null>(null)
 
@@ -111,9 +115,10 @@ export default function App() {
     setLoadingClaims(true)
     try {
       const payload = await apiFetch('/my/claims')
-      setMyClaims(Array.isArray(payload.claims) ? payload.claims : [])
+      setReceivedClaims(Array.isArray(payload.received) ? payload.received : [])
+      setSentClaims(Array.isArray(payload.sent) ? payload.sent : [])
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Could not load incoming requests.')
+      setNotice(error instanceof Error ? error.message : 'Could not load requests.')
     } finally { setLoadingClaims(false) }
   }, [user])
 
@@ -128,8 +133,8 @@ export default function App() {
         method: 'PATCH',
         body: JSON.stringify({ status: newStatus }),
       })
-      setMyClaims(prev => prev.map(c => c.id === claimId ? { ...c, status: newStatus } : c))
-      setNotice(res.message || `Request ${newStatus}.`)
+      setReceivedClaims(prev => prev.map(c => c.id === claimId ? { ...c, status: newStatus } : c))
+      setNotice(res.message || `Request ${newStatus}. Status email sent!`)
       void loadListings()
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Failed to update request.')
@@ -216,10 +221,12 @@ export default function App() {
         body: JSON.stringify({
           message: claimForm.message.trim(),
           requester_name: user?.username || undefined,
+          requester_email: user?.email || undefined,
         }),
       })
       setShowClaim(false); setSelected(null); setClaimForm(blankClaim)
-      setNotice('Your request has been saved successfully.')
+      setNotice('Your request has been saved successfully!')
+      void loadMyClaims()
     } catch (error) { setClaimError(error instanceof Error ? error.message : 'Could not send request.') }
     finally { setClaimBusy(false) }
   }
@@ -236,7 +243,7 @@ export default function App() {
         <button onClick={goToBrowse}>Browse items</button><a href="#how-it-works" onClick={() => setMobileMenu(false)}>How it works</a><a href="#impact" onClick={() => setMobileMenu(false)}>Our impact</a>
         {user && (
           <button onClick={() => { setShowMyClaims(true); void loadMyClaims(); setMobileMenu(false) }}>
-            Incoming requests {myClaims.filter(c => c.status === 'pending').length > 0 ? `(${myClaims.filter(c => c.status === 'pending').length})` : ''}
+            Requests &amp; Activity {receivedClaims.filter(c => c.status === 'pending').length > 0 ? `(${receivedClaims.filter(c => c.status === 'pending').length})` : ''}
           </button>
         )}
         <div className="auth-nav">{user ? <><span className="auth-username" title={user.username}>{user.username}</span><button className="button button-secondary auth-button" onClick={handleSignOut}>Sign out</button></> : <button className="button button-secondary auth-button" onClick={() => { setAuthOpen(true); setAuthMode('signin'); setAuthError(''); setMobileMenu(false) }}>Sign in</button>}</div><button className="button button-primary nav-cta" onClick={() => { requestCreateListing(); setMobileMenu(false) }}><PackagePlus size={17} /> Share an item</button>
@@ -278,54 +285,110 @@ export default function App() {
         <section className="modal claims-modal" role="dialog" aria-modal="true" aria-labelledby="claims-title">
           <div className="modal-header">
             <div>
-              <span className="eyebrow">YOUR LISTINGS</span>
-              <h2 id="claims-title">Incoming requests</h2>
-              <p>Manage people who requested your shared items.</p>
+              <span className="eyebrow">COMMUNITY ACTIVITY</span>
+              <h2 id="claims-title">Requests &amp; History</h2>
+              <p>Manage incoming requests on your listings and track items you requested.</p>
             </div>
             <button className="icon-button modal-close" onClick={() => setShowMyClaims(false)} aria-label="Close"><X /></button>
           </div>
+
+          <div className="claims-tabs">
+            <button
+              className={`claims-tab-btn ${claimsTab === 'received' ? 'tab-active' : ''}`}
+              onClick={() => setClaimsTab('received')}
+            >
+              Received on My Items
+              {receivedClaims.filter(c => c.status === 'pending').length > 0 ? (
+                <span className="tab-badge badge-pending">
+                  {receivedClaims.filter(c => c.status === 'pending').length} new
+                </span>
+              ) : (
+                <span className="tab-badge">{receivedClaims.length}</span>
+              )}
+            </button>
+            <button
+              className={`claims-tab-btn ${claimsTab === 'sent' ? 'tab-active' : ''}`}
+              onClick={() => setClaimsTab('sent')}
+            >
+              My Sent Requests
+              <span className="tab-badge">{sentClaims.length}</span>
+            </button>
+          </div>
+
           <div className="claims-list">
             {loadingClaims ? (
               <p style={{ textAlign: 'center', padding: '24px', color: '#7a867b' }}>Loading requests...</p>
-            ) : myClaims.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '36px 12px', color: '#7a867b' }}>
-                <p style={{ margin: 0, fontWeight: 700, fontSize: '15px' }}>No requests received yet</p>
-                <small>When community members request items you listed, they will show up here.</small>
-              </div>
-            ) : (
-              myClaims.map(claim => (
-                <div className="claim-card" key={claim.id}>
-                  <div className="claim-header">
-                    <div>
-                      <div className="claim-title">{claim.resource_title}</div>
-                      <div className="claim-requester">Requested by <strong>{claim.requester_name}</strong></div>
-                    </div>
-                    <span className={`claim-status status-${claim.status}`}>{claim.status}</span>
-                  </div>
-                  {claim.message && <div className="claim-message">&ldquo;{claim.message}&rdquo;</div>}
-                  <div className="claim-meta">
-                    <span>{dateLabel(claim.created_at)}</span>
-                    {claim.status === 'pending' && (
-                      <div className="claim-btn-group">
-                        <button
-                          className="btn-approve"
-                          disabled={updatingClaimId === claim.id}
-                          onClick={() => void updateClaimStatus(claim.id, 'approved')}
-                        >
-                          {updatingClaimId === claim.id ? 'Updating...' : 'Approve'}
-                        </button>
-                        <button
-                          className="btn-reject"
-                          disabled={updatingClaimId === claim.id}
-                          onClick={() => void updateClaimStatus(claim.id, 'rejected')}
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    )}
-                  </div>
+            ) : claimsTab === 'received' ? (
+              receivedClaims.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '36px 12px', color: '#7a867b' }}>
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: '15px' }}>No incoming requests yet</p>
+                  <small>When other members request your listed items, they will appear here for your review.</small>
                 </div>
-              ))
+              ) : (
+                receivedClaims.map(claim => (
+                  <div className="claim-card" key={claim.id}>
+                    <div className="claim-header">
+                      <div>
+                        <div className="claim-title">{claim.resource_title}</div>
+                        <div className="claim-requester">Requested by <strong>{claim.requester_name}</strong></div>
+                      </div>
+                      <span className={`claim-status status-${claim.status}`}>{claim.status}</span>
+                    </div>
+                    {claim.message && <div className="claim-message">&ldquo;{claim.message}&rdquo;</div>}
+                    <div className="claim-meta">
+                      <span>{dateLabel(claim.created_at)}</span>
+                      {claim.status === 'pending' ? (
+                        <div className="claim-btn-group">
+                          <button
+                            className="btn-approve"
+                            disabled={updatingClaimId === claim.id}
+                            onClick={() => void updateClaimStatus(claim.id, 'approved')}
+                          >
+                            {updatingClaimId === claim.id ? 'Updating...' : 'Approve'}
+                          </button>
+                          <button
+                            className="btn-reject"
+                            disabled={updatingClaimId === claim.id}
+                            onClick={() => void updateClaimStatus(claim.id, 'rejected')}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: '11px', color: '#6e7b70', fontStyle: 'italic' }}>
+                          Decision made ({claim.status})
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )
+            ) : (
+              sentClaims.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '36px 12px', color: '#7a867b' }}>
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: '15px' }}>No sent requests yet</p>
+                  <small>Browse items in the catalog and request what you need to track it here.</small>
+                </div>
+              ) : (
+                sentClaims.map(claim => (
+                  <div className="claim-card" key={claim.id}>
+                    <div className="claim-header">
+                      <div>
+                        <div className="claim-title">{claim.resource_title}</div>
+                        <div className="claim-requester">{claim.resource_category} {claim.resource_location ? `• ${claim.resource_location}` : ''}</div>
+                      </div>
+                      <span className={`claim-status status-${claim.status}`}>{claim.status}</span>
+                    </div>
+                    {claim.message && <div className="claim-message">&ldquo;{claim.message}&rdquo;</div>}
+                    <div className="claim-meta">
+                      <span>Requested on {dateLabel(claim.created_at)}</span>
+                      <span style={{ fontSize: '11px', color: claim.status === 'approved' ? '#1e6845' : claim.status === 'rejected' ? '#a53e2f' : '#b45309', fontWeight: 600 }}>
+                        {claim.status === 'approved' ? 'Owner accepted request' : claim.status === 'rejected' ? 'Owner declined' : 'Awaiting owner review'}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )
             )}
           </div>
         </section>

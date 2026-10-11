@@ -140,11 +140,12 @@ app.post('/api/resources/:id/claims', requireAuth, async (req, res, next) => {
     if (message.length > 500) return res.status(400).json({ error: 'Message must be 500 characters or fewer.' })
     // Prefer the display name sent by the client (from Cognito name attribute) over the raw sub
     const requesterName = String(req.body?.requester_name || req.auth.username || req.auth.sub).trim().slice(0, 100)
+    const requesterEmail = typeof req.body?.requester_email === 'string' ? req.body.requester_email.trim().slice(0, 254) : null
     const result = await pool.query(
       `INSERT INTO claims (resource_id, requester_name, requester_email, requester_sub, message)
-       SELECT id, $2, NULL, $3::text, $4 FROM resources WHERE id = $1 AND status = 'available' AND owner_sub IS DISTINCT FROM $3::text
-       RETURNING id, resource_id, requester_name, status, created_at`,
-      [req.params.id, requesterName, req.auth.sub, message],
+       SELECT id, $2, $3, $4::text, $5 FROM resources WHERE id = $1 AND status = 'available' AND owner_sub IS DISTINCT FROM $4::text
+       RETURNING id, resource_id, requester_name, requester_email, status, created_at`,
+      [req.params.id, requesterName, requesterEmail, req.auth.sub, message],
     )
     if (!result.rowCount) {
       const exists = await pool.query('SELECT status, owner_sub FROM resources WHERE id = $1', [req.params.id])
@@ -188,16 +189,18 @@ app.post('/api/resources/:id/claims', requireAuth, async (req, res, next) => {
   }
 })
 
-// Returns all claims on resources owned by the logged-in user
+// Returns both received requests (on listings I own) and sent requests (listings I requested)
 app.get('/api/my/claims', requireAuth, async (req, res, next) => {
   try {
-    const result = await pool.query(
+    const received = await pool.query(
       `SELECT
          c.id,
          c.resource_id,
-         r.title  AS resource_title,
+         r.title AS resource_title,
          r.category AS resource_category,
+         r.location AS resource_location,
          c.requester_name,
+         c.requester_email,
          c.message,
          c.status,
          c.created_at
@@ -207,7 +210,31 @@ app.get('/api/my/claims', requireAuth, async (req, res, next) => {
        ORDER BY c.created_at DESC`,
       [req.auth.sub],
     )
-    res.json({ claims: result.rows })
+
+    const sent = await pool.query(
+      `SELECT
+         c.id,
+         c.resource_id,
+         r.title AS resource_title,
+         r.category AS resource_category,
+         r.location AS resource_location,
+         c.requester_name,
+         c.requester_email,
+         c.message,
+         c.status,
+         c.created_at
+       FROM claims c
+       JOIN resources r ON r.id = c.resource_id
+       WHERE c.requester_sub = $1
+       ORDER BY c.created_at DESC`,
+      [req.auth.sub],
+    )
+
+    res.json({
+      received: received.rows,
+      sent: sent.rows,
+      claims: received.rows, // Backward compatibility
+    })
   } catch (error) { next(error) }
 })
 
@@ -223,16 +250,50 @@ app.patch('/api/my/claims/:id', requireAuth, async (req, res, next) => {
        SET status = $1
        FROM resources r
        WHERE c.id = $2 AND c.resource_id = r.id AND r.owner_sub = $3
-       RETURNING c.id, c.resource_id, c.requester_name, c.status, c.created_at`,
+       RETURNING c.id, c.resource_id, r.title AS resource_title, c.requester_name, c.requester_email, c.status, c.created_at`,
       [status, req.params.id, req.auth.sub],
     )
     if (!result.rowCount) {
       return res.status(404).json({ error: 'Claim not found or you do not have permission to manage it.' })
     }
+    const updatedClaim = result.rows[0]
     if (status === 'approved') {
-      await pool.query('UPDATE resources SET status = $1 WHERE id = $2', ['reserved', result.rows[0].resource_id])
+      await pool.query('UPDATE resources SET status = $1 WHERE id = $2', ['reserved', updatedClaim.resource_id])
     }
-    res.json({ message: `Claim marked as ${status}.`, claim: result.rows[0] })
+
+    // Fire-and-forget: email the requester about their request approval/rejection
+    if (resend && updatedClaim.requester_email) {
+      const isApproved = status === 'approved'
+      const title = updatedClaim.resource_title || 'Item'
+      const subject = isApproved
+        ? `Great news! Your request for "${title}" was approved 🎉`
+        : `Update: Your request for "${title}"`
+      const statusBanner = isApproved
+        ? `<div style="background:#e6f2e5;color:#1e6845;padding:12px 16px;border-radius:8px;font-weight:bold;margin:16px 0;">Status: Approved ✅</div>`
+        : `<div style="background:#fff0ed;color:#a53e2f;padding:12px 16px;border-radius:8px;font-weight:bold;margin:16px 0;">Status: Declined ❌</div>`
+      const actionText = isApproved
+        ? `<p>The owner approved your request. You can now coordinate handover or pickup directly on <strong>${APP_NAME}</strong>.</p>`
+        : `<p>The owner was unable to fulfill your request at this time. Browse <strong>${APP_NAME}</strong> for more community items.</p>`
+
+      resend.emails.send({
+        from: resendFrom,
+        to: updatedClaim.requester_email,
+        subject,
+        html: `
+          <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#1a1a1a">
+            <h2 style="margin-top:0;color:#16a34a">${APP_NAME} Request Update</h2>
+            <p>Hi <strong>${updatedClaim.requester_name || 'there'}</strong>,</p>
+            <p>There is an update on your request for <strong>${title}</strong>:</p>
+            ${statusBanner}
+            ${actionText}
+            <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0" />
+            <p style="font-size:12px;color:#9ca3af">You received this notification because you sent a request on ${APP_NAME}.</p>
+          </div>
+        `,
+      }).catch(err => console.error('Status email error:', err))
+    }
+
+    res.json({ message: `Claim marked as ${status}.`, claim: updatedClaim })
   } catch (error) { next(error) }
 })
 
