@@ -1,7 +1,7 @@
 services:
   claim-db:
     image: postgres:16-alpine
-    container_name: claim-postgres
+    container_name: cna-claim-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-claim_user}
@@ -21,7 +21,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: claim-service
+    container_name: cna-claim-service
     restart: unless-stopped
     ports:
       - "${PORT:-4003}:4003"

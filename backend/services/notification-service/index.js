@@ -16,8 +16,8 @@ app.use(morgan('[:date[iso]] :method :url :status - :response-time ms'))
 app.use(cors())
 app.use(express.json())
 
-// Health check endpoint for Docker / Kubernetes probes
-app.get('/health', (_req, res) => {
+// Health check endpoint for Docker probes and API Gateway reverse proxy
+const healthHandler = (_req, res) => {
   const rabbitStatus = isRabbitConnected()
   res.status(rabbitStatus ? 200 : 503).json({
     status: rabbitStatus ? 'ok' : 'degraded',
@@ -26,7 +26,10 @@ app.get('/health', (_req, res) => {
     rabbitmqConnected: rabbitStatus,
     resendConfigured: !!resendApiKey,
   })
-})
+}
+
+app.get('/health', healthHandler)
+app.get('/api/notifications/health', healthHandler)
 
 const server = app.listen(PORT, '0.0.0.0', async () => {
   console.log(`[notification-service] HTTP health endpoint running on http://0.0.0.0:${PORT}`)

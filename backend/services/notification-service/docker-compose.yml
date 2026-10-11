@@ -1,7 +1,7 @@
 services:
   rabbitmq:
     image: rabbitmq:3-management-alpine
-    container_name: notification-rabbitmq
+    container_name: cna-notification-rabbitmq
     restart: unless-stopped
     ports:
       - "${RABBITMQ_PORT:-5672}:5672"
@@ -19,7 +19,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: notification-service
+    container_name: cna-notification-service
     restart: unless-stopped
     ports:
       - "${PORT:-4004}:4004"

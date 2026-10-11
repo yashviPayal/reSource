@@ -1,7 +1,7 @@
 services:
   resource-db:
     image: postgres:16-alpine
-    container_name: resource-postgres
+    container_name: cna-resource-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-resource_user}
@@ -21,7 +21,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: resource-service
+    container_name: cna-resource-service
     restart: unless-stopped
     ports:
       - "${PORT:-4001}:4001"
