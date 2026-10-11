@@ -1,0 +1,38 @@
+services:
+  resource-db:
+    image: postgres:16-alpine
+    container_name: resource-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-resource_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-resource_dev_password}
+      POSTGRES_DB: ${DB_NAME:-resource_db}
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    volumes:
+      - resource_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-resource_user} -d ${DB_NAME:-resource_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  resource-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: resource-service
+    restart: unless-stopped
+    ports:
+      - "${PORT:-4001}:4001"
+    # DevSecOps Best Practice: Load secrets securely from .env file
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-resource_user}:${DB_PASSWORD:-resource_dev_password}@resource-db:5432/${DB_NAME:-resource_db}
+    depends_on:
+      resource-db:
+        condition: service_healthy
+
+volumes:
+  resource_postgres_data:
