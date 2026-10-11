@@ -1,4 +1,6 @@
+
 name: Deploy reSource to AWS
+
 on:
   workflow_dispatch:
   push:
@@ -7,20 +9,27 @@ on:
       - 'frontend/**'
       - 'services/resource-service/**'
       - '.github/workflows/deploy-aws.yml'
+
 permissions:
   id-token: write
   contents: read
+
 jobs:
   deploy:
     name: Build and deploy frontend and API
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
       - name: Install and build frontend
         working-directory: frontend
         env:
@@ -28,16 +37,19 @@ jobs:
           VITE_COGNITO_USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
           VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
         run: |
-          npm install
+          npm ci
           npm run build
+
       - name: Configure AWS credentials using GitHub OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+
       - name: Login to Amazon ECR
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
+
       - name: Build and push API image
         env:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
@@ -46,20 +58,27 @@ jobs:
         run: |
           docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" services/resource-service
           docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
       - name: Upload frontend to S3
         run: aws s3 sync frontend/dist/ "s3://${{ vars.AWS_FRONTEND_BUCKET }}/" --delete
+
       - name: Invalidate CloudFront cache
         run: aws cloudfront create-invalidation --distribution-id "${{ vars.AWS_CLOUDFRONT_DISTRIBUTION_ID }}" --paths '/*'
+
       - name: Read current ECS task definition
         env:
           ECS_CLUSTER: ${{ vars.AWS_ECS_CLUSTER }}
           ECS_SERVICE: ${{ vars.AWS_ECS_SERVICE }}
         run: |
           TASK_DEFINITION_ARN=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].taskDefinition' --output text)
-          if [ -z "$TASK_DEFINITION_ARN" ] || [ "$TASK_DEFINITION_ARN" = "None" ]; then echo 'ECS service/task definition not found.'; exit 1; fi
+          if [ -z "$TASK_DEFINITION_ARN" ] || [ "$TASK_DEFINITION_ARN" = "None" ]; then
+            echo "ECS service/task definition not found."
+            exit 1
+          fi
           aws ecs describe-task-definition --task-definition "$TASK_DEFINITION_ARN" --query taskDefinition > task-definition.json
           jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' task-definition.json > task-definition-clean.json
           mv task-definition-clean.json task-definition.json
+
       - name: Update API image in task definition
         id: render-task-definition
         uses: aws-actions/amazon-ecs-render-task-definition@v1
@@ -67,6 +86,7 @@ jobs:
           task-definition: task-definition.json
           container-name: resource-service
           image: ${{ steps.ecr-login.outputs.registry }}/${{ vars.AWS_ECR_REPOSITORY }}:${{ github.sha }}
+
       - name: Deploy API to ECS Fargate
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
