@@ -3,7 +3,6 @@
 A responsive community reuse platform for giving useful things a second life through **Donate, Reuse, Repair, and Recycle**. This repository is the complete working-code bundle for local development and an AWS deployment path. AWS resources still need to be created in your own AWS account; the code cannot create them without account access and explicit credentials.
 
 ## Product functions
-
 - Responsive landing page for desktop, tablet, and mobile.
 - Browse item listings across Books & Paper, Clothing, Electronics, Furniture, and Household.
 - Search titles, descriptions, categories, actions, and locations.
