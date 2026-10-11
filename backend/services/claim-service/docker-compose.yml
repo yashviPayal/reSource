@@ -1,0 +1,39 @@
+services:
+  claim-db:
+    image: postgres:16-alpine
+    container_name: claim-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-claim_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-claim_dev_password}
+      POSTGRES_DB: ${DB_NAME:-claim_db}
+    ports:
+      - "${DB_PORT:-5435}:5432"
+    volumes:
+      - claim_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-claim_user} -d ${DB_NAME:-claim_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  claim-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: claim-service
+    restart: unless-stopped
+    ports:
+      - "${PORT:-4003}:4003"
+    # DevSecOps Best Practice: Load secrets from .env file
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-claim_user}:${DB_PASSWORD:-claim_dev_password}@claim-db:5432/${DB_NAME:-claim_db}
+      - RESOURCE_SERVICE_URL=http://resource-service:4001
+    depends_on:
+      claim-db:
+        condition: service_healthy
+
+volumes:
+  claim_postgres_data:
