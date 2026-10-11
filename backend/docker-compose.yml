@@ -1,0 +1,198 @@
+services:
+  # =================================================================
+  # 0. RabbitMQ Message Broker (AMQP 5672 + Management UI 15672)
+  # =================================================================
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: resource-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # =================================================================
+  # 1. API Gateway (Reverse Proxy entry point on Port 4000)
+  # =================================================================
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-4000}:4000"
+    environment:
+      PORT: 4000
+      AUTH_SERVICE_URL: http://auth-service:4002
+      RESOURCE_SERVICE_URL: http://resource-service:4001
+      CLAIM_SERVICE_URL: http://claim-service:4003
+      NOTIFICATION_SERVICE_URL: http://notification-service:4004
+      CLIENT_URL: "*"
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      resource-service:
+        condition: service_healthy
+      claim-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+
+  # =================================================================
+  # 2. Auth Service Database & Microservice (Port 4002)
+  # =================================================================
+  auth-db:
+    image: postgres:16-alpine
+    container_name: auth-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${AUTH_DB_USER:-auth_user}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:-auth_dev_password}
+      POSTGRES_DB: ${AUTH_DB_NAME:-auth_db}
+    ports:
+      - "${AUTH_DB_PORT:-5434}:5432"
+    volumes:
+      - auth_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AUTH_DB_USER:-auth_user} -d ${AUTH_DB_NAME:-auth_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: auth-service
+    restart: unless-stopped
+    ports:
+      - "${AUTH_PORT:-4002}:4002"
+    env_file:
+      - ./services/auth-service/.env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # =================================================================
+  # 3. Resource Service Database & Microservice (Port 4001)
+  # =================================================================
+  resource-db:
+    image: postgres:16-alpine
+    container_name: resource-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${RESOURCE_DB_USER:-resource_user}
+      POSTGRES_PASSWORD: ${RESOURCE_DB_PASSWORD:-resource_dev_password}
+      POSTGRES_DB: ${RESOURCE_DB_NAME:-resource_db}
+    ports:
+      - "${RESOURCE_DB_PORT:-5433}:5432"
+    volumes:
+      - resource_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RESOURCE_DB_USER:-resource_user} -d ${RESOURCE_DB_NAME:-resource_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  resource-service:
+    build:
+      context: ./services/resource-service
+      dockerfile: Dockerfile
+    container_name: resource-service
+    restart: unless-stopped
+    ports:
+      - "${RESOURCE_PORT:-4001}:4001"
+    env_file:
+      - ./services/resource-service/.env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # =================================================================
+  # 4. Claim Service Database & Microservice (Port 4003)
+  # =================================================================
+  claim-db:
+    image: postgres:16-alpine
+    container_name: claim-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${CLAIM_DB_USER:-claim_user}
+      POSTGRES_PASSWORD: ${CLAIM_DB_PASSWORD:-claim_dev_password}
+      POSTGRES_DB: ${CLAIM_DB_NAME:-claim_db}
+    ports:
+      - "${CLAIM_DB_PORT:-5435}:5432"
+    volumes:
+      - claim_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CLAIM_DB_USER:-claim_user} -d ${CLAIM_DB_NAME:-claim_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  claim-service:
+    build:
+      context: ./services/claim-service
+      dockerfile: Dockerfile
+    container_name: claim-service
+    restart: unless-stopped
+    ports:
+      - "${CLAIM_PORT:-4003}:4003"
+    env_file:
+      - ./services/claim-service/.env
+    environment:
+      - RESOURCE_SERVICE_URL=http://resource-service:4001
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # =================================================================
+  # 5. Notification Service (RabbitMQ Worker & Resend Email, Port 4004)
+  # =================================================================
+  notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    container_name: notification-service
+    restart: unless-stopped
+    ports:
+      - "${NOTIFICATION_PORT:-4004}:4004"
+    env_file:
+      - ./services/notification-service/.env
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  auth_postgres_data:
+  resource_postgres_data:
+  claim_postgres_data:
+  rabbitmq_data:
