@@ -12,3 +12,16 @@ coverage/
 # Kubernetes secrets (never push production credentials to Git)
 k8s/01-secrets.yaml
 !k8s/01-secrets.example.yaml
+
+# Terraform files
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*._override.tf
+*._override.tf.json
+terraform.tfvars
+*.pem
+cna-resource-key.pem
