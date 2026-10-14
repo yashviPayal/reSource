@@ -5,7 +5,6 @@ namespace: resource-app
 
 resources:
   - 00-namespace.yaml
-  - 01-secrets.yaml
   - 01-postgres-local.yaml
   - 02-configmaps.yaml
   - 03-rabbitmq.yaml
