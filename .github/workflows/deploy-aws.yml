@@ -1,18 +1,21 @@
 name: Deploy Backend to AWS EC2 (K3s)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'backend/**'
-      - 'k8s/**'
-      - '.github/workflows/deploy-aws.yml'
+  workflow_run:
+    workflows: ["CI & DevSecOps Pipeline"]
+    types:
+      - completed
+    branches:
+      - main
+      - master
+      - microservices
   workflow_dispatch: # Allows manual trigger from GitHub Actions tab
 
 jobs:
   deploy-to-k3s:
     name: Deploy Microservices to AWS K3s Cluster
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success') }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

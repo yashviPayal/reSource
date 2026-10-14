@@ -2,9 +2,9 @@ name: CI & DevSecOps Pipeline
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, microservices]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, microservices]
   workflow_dispatch: # Allows manual trigger from GitHub Actions tab
 
 permissions:
