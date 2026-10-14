@@ -1,96 +1,112 @@
-
-name: Deploy reSource to AWS
+name: Deploy Backend to AWS EC2 (K3s)
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
     paths:
-      - 'frontend/**'
-      - 'services/resource-service/**'
+      - 'backend/**'
+      - 'k8s/**'
       - '.github/workflows/deploy-aws.yml'
-
-permissions:
-  id-token: write
-  contents: read
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
 
 jobs:
-  deploy:
-    name: Build and deploy frontend and API
-    runs-on: ubuntu-24.04
-
+  deploy-to-k3s:
+    name: Deploy Microservices to AWS K3s Cluster
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install and build frontend
-        working-directory: frontend
+      - name: Resolve EC2 Public IP
+        id: resolve-ip
         env:
-          VITE_API_URL: ${{ vars.VITE_API_URL }}
-          VITE_COGNITO_USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
-          VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION || 'ap-south-1' }}
         run: |
-          npm ci
-          npm run build
-
-      - name: Configure AWS credentials using GitHub OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and push API image
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          ECR_REPOSITORY: ${{ vars.AWS_ECR_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" services/resource-service
-          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-
-      - name: Upload frontend to S3
-        run: aws s3 sync frontend/dist/ "s3://${{ vars.AWS_FRONTEND_BUCKET }}/" --delete
-
-      - name: Invalidate CloudFront cache
-        run: aws cloudfront create-invalidation --distribution-id "${{ vars.AWS_CLOUDFRONT_DISTRIBUTION_ID }}" --paths '/*'
-
-      - name: Read current ECS task definition
-        env:
-          ECS_CLUSTER: ${{ vars.AWS_ECS_CLUSTER }}
-          ECS_SERVICE: ${{ vars.AWS_ECS_SERVICE }}
-        run: |
-          TASK_DEFINITION_ARN=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].taskDefinition' --output text)
-          if [ -z "$TASK_DEFINITION_ARN" ] || [ "$TASK_DEFINITION_ARN" = "None" ]; then
-            echo "ECS service/task definition not found."
+          if [ -n "${{ secrets.EC2_HOST }}" ]; then
+            echo "Using manual EC2_HOST secret: ${{ secrets.EC2_HOST }}"
+            echo "ip=${{ secrets.EC2_HOST }}" >> $GITHUB_OUTPUT
+          elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+            echo "Querying AWS EC2 API for running instance with tag Name=cna-resource-k3s-node..."
+            DISCOVERED_IP=$(aws ec2 describe-instances \
+              --filters "Name=tag:Name,Values=cna-resource-k3s-node" "Name=instance-state-name,Values=running" \
+              --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+            if [ -z "$DISCOVERED_IP" ] || [ "$DISCOVERED_IP" = "None" ]; then
+              echo "Error: Could not find a running EC2 instance with tag Name=cna-resource-k3s-node"
+              exit 1
+            fi
+            echo "Discovered running EC2 IP: $DISCOVERED_IP"
+            echo "ip=$DISCOVERED_IP" >> $GITHUB_OUTPUT
+          else
+            echo "Error: Neither EC2_HOST nor AWS credentials (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) are configured in GitHub Secrets."
             exit 1
           fi
-          aws ecs describe-task-definition --task-definition "$TASK_DEFINITION_ARN" --query taskDefinition > task-definition.json
-          jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' task-definition.json > task-definition-clean.json
-          mv task-definition-clean.json task-definition.json
 
-      - name: Update API image in task definition
-        id: render-task-definition
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          task-definition: task-definition.json
-          container-name: resource-service
-          image: ${{ steps.ecr-login.outputs.registry }}/${{ vars.AWS_ECR_REPOSITORY }}:${{ github.sha }}
+          host: ${{ steps.resolve-ip.outputs.ip }}
+          username: ${{ secrets.EC2_USER || 'ubuntu' }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          timeout: 300s
+          script: |
+            set -e
+            echo "=== Connecting to EC2 K3s Cluster ==="
 
-      - name: Deploy API to ECS Fargate
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.render-task-definition.outputs.task-definition }}
-          service: ${{ vars.AWS_ECS_SERVICE }}
-          cluster: ${{ vars.AWS_ECS_CLUSTER }}
-          wait-for-service-stability: true
+            # 1. Ensure project directory exists and pull latest code
+            REPO_DIR="/home/ubuntu/reSource"
+            if [ ! -d "$REPO_DIR" ]; then
+              echo "Cloning repository..."
+              git clone "https://github.com/${{ github.repository }}.git" "$REPO_DIR"
+              cd "$REPO_DIR"
+            else
+              echo "Pulling latest changes from main..."
+              cd "$REPO_DIR"
+              git fetch origin main
+              git reset --hard origin/main
+            fi
+
+            # 2. Ensure KUBECONFIG is loaded
+            export KUBECONFIG="/home/ubuntu/.kube/config"
+
+            # 3. Create or ensure resource-app namespace exists
+            kubectl apply -f k8s/00-namespace.yaml
+
+            # 4. Inject Production Secrets from GitHub Secrets into Kubernetes directly
+            # This completely avoids writing credentials to plaintext files!
+            echo "Updating Kubernetes production secrets (Supabase DB, JWT, Resend)..."
+            kubectl create secret generic resource-secrets \
+              --from-literal=DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+              --from-literal=JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+              --from-literal=RESEND_API_KEY="${{ secrets.RESEND_API_KEY }}" \
+              -n resource-app --dry-run=client -o yaml | kubectl apply -f -
+
+            # 5. Build Docker container images locally on EC2
+            echo "Building backend microservice images..."
+            docker compose -f backend/docker-compose.yml build
+
+            # 6. Import images into K3s containerd runtime
+            echo "Importing images into K3s containerd..."
+            docker save cna-resource-auth-service:latest | sudo k3s ctr images import -
+            docker save cna-resource-resource-service:latest | sudo k3s ctr images import -
+            docker save cna-resource-claim-service:latest | sudo k3s ctr images import -
+            docker save cna-resource-notification-service:latest | sudo k3s ctr images import -
+            docker save cna-resource-api-gateway:latest | sudo k3s ctr images import -
+
+            # 7. Apply Kubernetes manifests (ConfigMaps, Services, Ingress, Deployments, HPA)
+            echo "Applying Kubernetes manifests via Kustomize..."
+            kubectl apply -k k8s/
+
+            # 8. Trigger rolling restart to ensure all pods load new images
+            echo "Triggering zero-downtime rolling restart..."
+            kubectl rollout restart deployment -n resource-app
+
+            # 9. Verify deployment status
+            echo "Waiting for API Gateway deployment to become ready..."
+            kubectl rollout status deployment/api-gateway -n resource-app --timeout=90s
+
+            echo "=== Deployment Successful! Current Pod Status ==="
+            kubectl get pods -n resource-app -o wide
+            kubectl get svc,ingress -n resource-app
