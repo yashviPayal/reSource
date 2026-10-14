@@ -8,3 +8,7 @@ node_modules/
 coverage/
 .DS_Store
 *.log
+
+# Kubernetes secrets (never push production credentials to Git)
+k8s/01-secrets.yaml
+!k8s/01-secrets.example.yaml
