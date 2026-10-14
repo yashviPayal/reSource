@@ -28,7 +28,7 @@ type MyClaim = {
   created_at: string
 }
 
-const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:4001/api').replace(/\/$/, '')
+const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:4000/api').replace(/\/$/, '')
 const categories: { name: Category; icon: typeof BookOpen; note: string }[] = [
   { name: 'Books & Paper', icon: BookOpen, note: 'Books, notes, stationery' },
   { name: 'Clothing', icon: Shirt, note: 'Clothes, shoes, bags' },
@@ -52,7 +52,16 @@ function categoryEmoji(category: Category) {
 }
 async function apiFetch(path: string, init: RequestInit = {}) {
   const token = await authToken()
-  const response = await fetch(`${API_URL}${path}`, { ...init, signal: init.signal ?? AbortSignal.timeout(15000), headers: { ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init.headers } })
+  const response = await fetch(`${API_URL}${path}`, {
+    ...init,
+    credentials: 'include',
+    signal: init.signal ?? AbortSignal.timeout(15000),
+    headers: {
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init.headers,
+    },
+  })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`)
   return payload
@@ -114,7 +123,7 @@ export default function App() {
     if (!user) return
     setLoadingClaims(true)
     try {
-      const payload = await apiFetch('/my/claims')
+      const payload = await apiFetch('/claims/my')
       setReceivedClaims(Array.isArray(payload.received) ? payload.received : [])
       setSentClaims(Array.isArray(payload.sent) ? payload.sent : [])
     } catch (error) {
@@ -129,7 +138,7 @@ export default function App() {
   async function updateClaimStatus(claimId: number, newStatus: 'approved' | 'rejected') {
     setUpdatingClaimId(claimId)
     try {
-      const res = await apiFetch(`/my/claims/${claimId}`, {
+      const res = await apiFetch(`/claims/${claimId}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status: newStatus }),
       })
@@ -216,7 +225,7 @@ export default function App() {
     if (!selected) return
     setClaimBusy(true); setClaimError('')
     try {
-      await apiFetch(`/resources/${selected.id}/claims`, {
+      await apiFetch(`/claims/${selected.id}`, {
         method: 'POST',
         body: JSON.stringify({
           message: claimForm.message.trim(),

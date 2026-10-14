@@ -1,0 +1,6 @@
+aws_region       = "ap-south-1"     # Mumbai region
+project_name     = "cna-resource"
+environment      = "production"
+instance_type    = "t3.medium"      # 2 vCPU, 4GB RAM (ideal for K3s)
+key_name         = "my-aws-keypair" # Replace with your existing EC2 keypair name in AWS
+root_volume_size = 30               # 30 GB gp3 disk

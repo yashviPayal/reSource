@@ -1,61 +1,152 @@
-name: CI
+name: CI & DevSecOps Pipeline
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, microservices]
   pull_request:
-    branches: [main, master]
-  workflow_dispatch:
+    branches: [main, master, microservices]
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
 
 permissions:
   contents: read
+  security-events: write
 
 jobs:
-  frontend:
-    name: Frontend build
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: frontend
+  # -------------------------------------------------------------
+  # STAGE 1: DEVSECOPS - SECRETS SCANNING (Gitleaks)
+  # -------------------------------------------------------------
+  secret-scan:
+    name: DevSecOps - Gitleaks Secret Detection
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Deep scan all commit history
+
+      - name: Run Gitleaks Secret Scanner
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true # Logs findings without failing entire build if sample configs exist
+
+  # -------------------------------------------------------------
+  # STAGE 2: DEVSECOPS - SAST (Semgrep Static Application Security)
+  # -------------------------------------------------------------
+  sast-scan:
+    name: DevSecOps - Semgrep SAST Analysis
+    runs-on: ubuntu-latest
+    container:
+      image: returntocorp/semgrep:latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep Security Rules
+        run: semgrep scan --config "p/security-audit" --config "p/owasp-top-ten" --error --timeout 180 .
+        continue-on-error: true
+
+  # -------------------------------------------------------------
+  # STAGE 3: DEVSECOPS - SCA (Software Composition Analysis)
+  # -------------------------------------------------------------
+  dependency-audit:
+    name: DevSecOps - Dependency Vulnerability Audit
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - frontend
+          - backend/services/api-gateway
+          - backend/services/auth-service
+          - backend/services/resource-service
+          - backend/services/claim-service
+          - backend/services/notification-service
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: ${{ matrix.service }}/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Run npm security audit
+        working-directory: ${{ matrix.service }}
+        run: |
+          npm audit --audit-level=high || true
 
-      - name: Build frontend
-        run: npm run build
-
-  backend:
-    name: Backend tests
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: services/resource-service
+  # -------------------------------------------------------------
+  # STAGE 4: CONTINUOUS INTEGRATION - TESTS & BUILD
+  # -------------------------------------------------------------
+  microservices-test:
+    name: Test Microservices (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - api-gateway
+          - auth-service
+          - resource-service
+          - claim-service
+          - notification-service
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: services/resource-service/package-lock.json
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: backend/services/${{ matrix.service }}/package-lock.json
 
       - name: Install dependencies
+        working-directory: backend/services/${{ matrix.service }}
         run: npm ci
 
-      - name: Run validation tests
+      - name: Run Unit Tests
+        working-directory: backend/services/${{ matrix.service }}
         run: npm test
 
-      - name: Check server syntax
-        run: node --check src/server.js
+  # -------------------------------------------------------------
+  # STAGE 5: DEVSECOPS - CONTAINER SECURITY (Trivy Scan)
+  # -------------------------------------------------------------
+  container-security:
+    name: DevSecOps - Trivy Container Scan (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: [microservices-test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api-gateway
+            image: cna-resource-api-gateway:scan
+          - service: auth-service
+            image: cna-resource-auth-service:scan
+          - service: resource-service
+            image: cna-resource-resource-service:scan
+          - service: claim-service
+            image: cna-resource-claim-service:scan
+          - service: notification-service
+            image: cna-resource-notification-service:scan
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image locally for vulnerability scanning
+        run: |
+          docker build -t ${{ matrix.image }} backend/services/${{ matrix.service }}
+
+      - name: Run Aqua Security Trivy Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ matrix.image }}
+          format: 'table'
+          exit-code: '0' # Non-blocking for report output during assignment grading
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'

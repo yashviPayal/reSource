@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: resource-config
+  namespace: resource-app
+data:
+  NODE_ENV: "production"
+  DATABASE_SSL: "false"
+  DB_POOL_MAX: "10"
+  CLIENT_URL: "*"
+
+  # Service Discovery URLs via Kubernetes CoreDNS
+  AUTH_SERVICE_URL: "http://auth-service.resource-app.svc.cluster.local:4002"
+  RESOURCE_SERVICE_URL: "http://resource-service.resource-app.svc.cluster.local:4001"
+  CLAIM_SERVICE_URL: "http://claim-service.resource-app.svc.cluster.local:4003"
+  NOTIFICATION_SERVICE_URL: "http://notification-service.resource-app.svc.cluster.local:4004"
+
+  # RabbitMQ Broker URL inside the cluster
+  RABBITMQ_URL: "amqp://guest:guest@rabbitmq.resource-app.svc.cluster.local:5672"
+
+  # Application & Email Metadata
+  APP_NAME: "reSource"
+  RESEND_FROM_EMAIL: "reSource <noreply@resource.mentalorbit.tech>"

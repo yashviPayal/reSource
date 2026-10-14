@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: resource-app
+
+resources:
+  - 00-namespace.yaml
+  - 01-secrets.yaml
+  - 01-postgres-local.yaml
+  - 02-configmaps.yaml
+  - 03-rabbitmq.yaml
+  - 04-auth-service.yaml
+  - 05-resource-service.yaml
+  - 06-claim-service.yaml
+  - 07-notification-service.yaml
+  - 08-api-gateway.yaml
+  - 10-ingress.yaml
+  - 11-hpa.yaml
