@@ -7,6 +7,11 @@ metadata:
     app: api-gateway
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: api-gateway
@@ -15,6 +20,7 @@ spec:
       labels:
         app: api-gateway
     spec:
+      terminationGracePeriodSeconds: 10
       containers:
         - name: api-gateway
           image: cna-resource-api-gateway:latest

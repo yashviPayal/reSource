@@ -102,13 +102,13 @@ jobs:
             echo "Applying Kubernetes manifests via Kustomize..."
             kubectl apply -k k8s/
 
-            # 8. Trigger rolling restart to ensure all pods load new images
+            # 8. Trigger rolling restart of application microservices
             echo "Triggering zero-downtime rolling restart..."
-            kubectl rollout restart deployment -n resource-app
+            kubectl rollout restart deployment/api-gateway deployment/auth-service deployment/resource-service deployment/claim-service deployment/notification-service -n resource-app
 
             # 9. Verify deployment status
             echo "Waiting for API Gateway deployment to become ready..."
-            kubectl rollout status deployment/api-gateway -n resource-app --timeout=90s
+            kubectl rollout status deployment/api-gateway -n resource-app --timeout=180s
 
             echo "=== Deployment Successful! Current Pod Status ==="
             kubectl get pods -n resource-app -o wide
