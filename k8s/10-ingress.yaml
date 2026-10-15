@@ -4,13 +4,26 @@ metadata:
   name: resource-ingress
   namespace: resource-app
   annotations:
-    # Traefik (default in K3s) and Nginx Ingress compatibility
-    ingress.kubernetes.io/ssl-redirect: "false"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
 spec:
+  tls:
+    - hosts:
+        - resource-backend.mentalorbit.tech
+      secretName: resource-backend-tls
   rules:
+    - host: resource-backend.mentalorbit.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 4000
     - http:
         paths:
-          # Route all incoming backend traffic on port 80 directly to API Gateway
           - path: /
             pathType: Prefix
             backend:

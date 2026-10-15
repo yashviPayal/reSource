@@ -15,3 +15,4 @@ resources:
   - 08-api-gateway.yaml
   - 10-ingress.yaml
   - 11-hpa.yaml
+  - 12-cert-issuer.yaml

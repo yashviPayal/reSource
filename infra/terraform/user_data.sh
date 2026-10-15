@@ -47,6 +47,10 @@ cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/.kube/config
 chown -R ubuntu:ubuntu /home/ubuntu/.kube
 chmod 600 /home/ubuntu/.kube/config
 
+# 6. Install Cert-Manager for Automated Let's Encrypt SSL/TLS Certificates
+echo "=== Installing Cert-Manager ==="
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+
 # Add convenient aliases and environment variables to ubuntu's bashrc
 cat << 'EOF' >> /home/ubuntu/.bashrc
 export KUBECONFIG=/home/ubuntu/.kube/config
