@@ -236,4 +236,4 @@ For complete technical documentation, architectural diagrams, and grading refere
 ---
 
 ## 📄 License
-This project is developed as part of the **Cloud Native Architecture (CNA)** course assignment. Open source under the MIT License.
+Open source under the MIT License.
